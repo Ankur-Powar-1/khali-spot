@@ -6,7 +6,7 @@ Parking, simplified. For malls, offices, and any other parking location. React +
 
 - Owner and visitor signup/login, persistent Supabase sessions, email confirmation.
 - Owners create only their own lots: name, address, description, 1-26 rows and 1-20 spaces per row. Preview before saving a draft, then publish/unpublish. `2 x 5` produces A1-A5 and B1-B5.
-- Owners edit lot details and manually mark free, occupied, or unknown. Layouts are immutable after saving, preserving UUID slot identities for future sensors.
+- Owners edit lot details and manually mark free, occupied, or unknown from a popup beside the selected slot. It flips sides near screen edges, or fits below on narrow screens; close with Escape, the close button, or a click outside. Layouts are immutable after saving, preserving UUID slot identities for future sensors.
 - **Mark all free** lets an owner confirm that all manual-input spaces in the current lot are empty. A single atomic database update persists the marks and notifies visitors. Sensor-input spaces and other lots are unchanged; new lots still start unknown.
 - Visitors see published lots and read-only live maps/counts. Pay & Park is an informational **Coming soon** tab: no payments, reservations, or payment collection.
 - Unknown is never counted as free. Disconnected/error views retain clearly labelled last-known data. Manual writes are disabled while the view is stale.

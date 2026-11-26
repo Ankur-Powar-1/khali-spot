@@ -113,6 +113,47 @@ test('visitor cannot edit and Pay & Park collects nothing', async ({ page }, tes
   await page.screenshot({ path: testInfo.outputPath('pay-and-park-test-data.png'), fullPage: true })
 })
 
+test('slot popup stays beside the space when possible and inside the viewport', async ({ page }, testInfo) => {
+  await backend(page, 'owner')
+  await page.goto('/')
+  await expect(page.getByText('Live updates connected')).toBeVisible()
+  await page.getByRole('button', { name: /Library parking/ }).click()
+  const first = page.getByRole('button', { name: 'A1: free' })
+  await first.click()
+  const popup = page.getByRole('dialog', { name: 'Update A1' })
+  await expect(popup).toBeVisible()
+  const target = (await first.boundingBox())!
+  const bounds = (await popup.boundingBox())!
+  const viewport = page.viewportSize()!
+  expect(bounds.x).toBeGreaterThanOrEqual(12)
+  expect(bounds.y).toBeGreaterThanOrEqual(12)
+  expect(bounds.x + bounds.width).toBeLessThanOrEqual(viewport.width - 12)
+  expect(bounds.y + bounds.height).toBeLessThanOrEqual(viewport.height - 12)
+  if (target.x + target.width + 10 + bounds.width <= viewport.width - 12) {
+    expect(bounds.x).toBeCloseTo(target.x + target.width + 10, 0)
+  }
+  await page.screenshot({ path: testInfo.outputPath('slot-popup-test-data.png'), fullPage: true })
+  await page.keyboard.press('Escape')
+  await expect(popup).toHaveCount(0)
+  await expect(first).toBeFocused()
+  const edge = page.getByRole('button', { name: 'A5: free' })
+  await edge.click()
+  const edgePopup = page.getByRole('dialog', { name: 'Update A5' })
+  const edgeBounds = (await edgePopup.boundingBox())!
+  const edgeTarget = (await edge.boundingBox())!
+  expect(edgeBounds.x).toBeGreaterThanOrEqual(12)
+  expect(edgeBounds.x + edgeBounds.width).toBeLessThanOrEqual(viewport.width - 12)
+  if (edgeTarget.x + edgeTarget.width + 10 + edgeBounds.width > viewport.width - 12 && edgeTarget.x - edgeBounds.width - 10 >= 12) {
+    expect(edgeBounds.x + edgeBounds.width).toBeCloseTo(edgeTarget.x - 10, 0)
+  }
+  await edgePopup.getByRole('button', { name: 'Mark occupied' }).click()
+  await expect(edgePopup).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'A5: occupied' })).toBeVisible()
+  await first.click()
+  await page.getByRole('heading', { name: 'Parking layout' }).click()
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+})
+
 test('visitor receives SDK realtime notifications without pressing refresh', async ({ page }) => {
   const remote = await backend(page, 'visitor')
   await page.goto('/')

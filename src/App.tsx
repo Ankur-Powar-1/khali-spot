@@ -1,4 +1,5 @@
-import { useEffect, useState, type FormEvent } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from 'react'
+import { createPortal } from 'react-dom'
 import type { Session } from '@supabase/supabase-js'
 import { ArrowRight, CarFront, Check, ChevronRight, Clock3, CreditCard, LayoutGrid, Leaf, LogOut, MapPin, ParkingSquare, Plus, Radio, ShieldCheck, X } from 'lucide-react'
 import { api as defaultApi, configured, type ParkingApi } from './api'
@@ -128,7 +129,7 @@ function LotForm({ onCancel, onSave }: { onCancel: () => void; onSave: (draft: L
 }
 function LotDetail({ lot, slots, profile, stale, api, refresh, onBack }: { lot: Lot; slots: Slot[]; profile: Profile; stale: boolean; api: ParkingApi; refresh: () => Promise<void>; onBack: () => void }) {
   const editable = canEdit(profile, lot)
-  const [picked, setPicked] = useState<Slot | null>(null)
+  const [picked, setPicked] = useState<{ id: string; anchor: HTMLButtonElement } | null>(null)
   const [editing, setEditing] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
@@ -155,9 +156,59 @@ function LotDetail({ lot, slots, profile, stale, api, refresh, onBack }: { lot: 
     <div className="panel parking-map"><div className="section-title"><h3>Parking layout</h3><span className="muted">{lot.rows} rows &times; {lot.spaces_per_row} spaces</span></div><p className="muted">{editable ? 'Select a space to mark its availability. Updates appear for visitors automatically.' : 'Read-only map. Availability is marked manually by the lot owner.'}</p><div className="map-entry"><ArrowRight size={16} /> ENTRY / EXIT <span>SCHEMATIC - NOT TO SCALE</span></div><div className="map-scroll">{Array.from({ length: lot.rows }, (_, row) => <div className="slot-row" key={row}><span className="row-label">{String.fromCharCode(65 + row)}</span>{slots.filter((s) => s.row_index === row).map((slot) => {
       const content = <>{slot.occupancy === 'occupied' ? <CarFront size={24} /> : slot.occupancy === 'free' ? <Check size={23} /> : <ParkingSquare size={23} />}<strong>{slot.label}</strong><small>{slot.occupancy === 'unknown' ? 'Unknown' : slot.occupancy === 'free' ? 'Free' : 'Occupied'}</small>{slot.input_mode === 'sensor' && <small>Sensor</small>}</>
       const title = `${slot.label}: ${slot.occupancy}. Source: ${slot.input_source}. ${slot.observed_at ? `Last marked ${new Date(slot.observed_at).toLocaleString()}` : 'No observation yet'}.`
-      return canEdit(profile, lot, slot) ? <button key={slot.id} className={`slot ${slot.occupancy}`} aria-label={`${slot.label}: ${slot.occupancy}`} title={title} disabled={busy || stale} onClick={() => setPicked(slot)}>{content}</button> : <div key={slot.id} className={`slot ${slot.occupancy}`} title={title} aria-label={`${slot.label}: ${slot.occupancy}`}>{content}</div>
+      return canEdit(profile, lot, slot) ? <button key={slot.id} className={`slot ${slot.occupancy} ${picked?.id === slot.id ? 'selected' : ''}`} aria-label={`${slot.label}: ${slot.occupancy}`} aria-haspopup="dialog" aria-expanded={picked?.id === slot.id} title={title} disabled={busy || stale} onClick={(e) => setPicked(picked?.id === slot.id ? null : { id: slot.id, anchor: e.currentTarget })}>{content}</button> : <div key={slot.id} className={`slot ${slot.occupancy}`} title={title} aria-label={`${slot.label}: ${slot.occupancy}`}>{content}</div>
     })}</div>)}</div><div className="legend"><span><i className="free" />Free</span><span><i className="occupied" />Occupied</span><span><i className="unknown" />Unknown</span><span className="legend-mode"><Radio size={14} />Manual demo</span></div></div>
-    {current && editable && <section className="panel slot-editor" aria-label={`Update ${current.label}`}><div><h3>Mark space {current.label}</h3><p className="muted">Manual input only. {current.observed_at ? `Last marked ${new Date(current.observed_at).toLocaleString()}.` : 'No observation yet.'}</p></div><div className="slot-actions">{(['free', 'occupied', 'unknown'] as Occupancy[]).map((status) => <button className={`mark ${status}`} key={status} disabled={busy || stale} onClick={() => void act(() => api.setSlot(current.id, status))}>Mark {status}</button>)}<button disabled={busy} onClick={() => setPicked(null)}>Cancel</button></div></section>}
+    {current && picked && canEdit(profile, lot, current) && <SlotPopover key={current.id} slot={current} anchor={picked.anchor} disabled={busy || stale} onClose={() => setPicked(null)} onMark={(status) => void act(() => api.setSlot(current.id, status))} />}
     <div className="demo-note"><Radio size={19} /><p><strong>Manual demo mode.</strong> No sensors are connected. Owners can mark only manual-input slots; future sensor-input slots cannot be manually overridden.</p></div>
   </section>
+}
+
+function SlotPopover({ slot, anchor, disabled, onClose, onMark }: { slot: Slot; anchor: HTMLButtonElement; disabled: boolean; onClose: () => void; onMark: (status: Occupancy) => void }) {
+  const panel = useRef<HTMLElement>(null)
+  const [position, setPosition] = useState({ left: 12, top: 12 })
+  useLayoutEffect(() => {
+    function place() {
+      if (!panel.current) return
+      const target = anchor.getBoundingClientRect()
+      const { width, height } = panel.current.getBoundingClientRect()
+      const gap = 10
+      const right = target.right + gap
+      const left = target.left - width - gap
+      const fitsRight = right + width <= window.innerWidth - 12
+      const fitsLeft = left >= 12
+      const x = fitsRight ? right : fitsLeft ? left : target.left
+      const y = fitsRight || fitsLeft ? target.top : target.bottom + gap
+      setPosition({
+        left: Math.max(12, Math.min(x, window.innerWidth - width - 12)),
+        top: Math.max(12, Math.min(y, window.innerHeight - height - 12)),
+      })
+    }
+    place()
+    panel.current?.querySelector<HTMLButtonElement>('button')?.focus()
+    window.addEventListener('resize', place)
+    window.addEventListener('scroll', place, true)
+    return () => {
+      window.removeEventListener('resize', place)
+      window.removeEventListener('scroll', place, true)
+    }
+  }, [anchor])
+  useEffect(() => {
+    function dismiss(e: PointerEvent) {
+      if (e.target instanceof Node && !panel.current?.contains(e.target) && !anchor.contains(e.target)) onClose()
+    }
+    function escape(e: KeyboardEvent) {
+      if (e.key === 'Escape') { onClose(); anchor.focus() }
+    }
+    document.addEventListener('pointerdown', dismiss)
+    document.addEventListener('keydown', escape)
+    return () => {
+      document.removeEventListener('pointerdown', dismiss)
+      document.removeEventListener('keydown', escape)
+    }
+  }, [anchor, onClose])
+  return createPortal(<section ref={panel} className="panel slot-popover" role="dialog" aria-label={`Update ${slot.label}`} style={position}>
+    <div className="slot-popover-heading"><h3>Mark space {slot.label}</h3><button className="icon-button" aria-label="Close slot update" onClick={() => { onClose(); anchor.focus() }}><X size={18} /></button></div>
+    <p className="muted">Manual input only. Currently {slot.occupancy}.</p>
+    <div className="slot-actions">{(['free', 'occupied', 'unknown'] as Occupancy[]).map((status) => <button className={`mark ${status}`} key={status} disabled={disabled} onClick={() => onMark(status)}>{status === 'free' ? <Check size={16} /> : status === 'occupied' ? <CarFront size={16} /> : <ParkingSquare size={16} />}Mark {status}</button>)}</div>
+  </section>, document.body)
 }
